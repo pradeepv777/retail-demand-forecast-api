@@ -1,23 +1,59 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
+*.py[cod]
+*$py.class
 
-# Jupyter
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook checkpoints & cache
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
-# Virtual environments
-.venv/
-venv/
-env/
-
-# Notes
-Notes/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# IDE
+# IDEs and editors
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 *.code-workspace
+
+# Operating System files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project-specific notes and scratch drafts
+Notes/
+*.log
