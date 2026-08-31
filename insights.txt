@@ -1,0 +1,90 @@
+# Rossmann Retail Demand Forecasting & Promotion Analysis: Key Project Insights
+
+This document synthesizes all analytical, statistical, and modeling insights gained across the exploratory data analysis, classical time series forecasting, machine learning models, and econometric promotion impact analysis.
+
+---
+
+## 1. Exploratory Data Analysis (EDA) & Demand Dynamics
+
+- **Weekly Seasonality Dominance**: Retail sales follow a rigid 7-day cyclical pattern. Monday experiences the highest weekly demand due to post-weekend shopping replenishment, while standard Sunday closures drop aggregate sales to near-zero.
+- **Monthly & Annual Patterns**: Significant seasonal spikes occur in December driven by Christmas/holiday shopping, followed by typical post-holiday demand drops in January. End-of-month and mid-month surges align with salary and payday cycles.
+- **Store Status Impact**: Approximately 17% of historical records reflect store closures (Sundays, state holidays, refurbishments). Filtering out zero-sales closure days is required to avoid skewed baseline statistics and artificial model variance.
+- **Store Typology Discrepancies**:
+  - *Store Type B* generates the highest average daily sales (~10,058 units/currency) and operates with significantly higher customer density and Sunday openings.
+  - *Store Types A, C, and D* exhibit similar average revenue (~5,600 - 5,740), but Type D maintains higher sales per customer basket sizes and longer competition distance resilience.
+- **Assortment Strategy**: Stores offering "Extra" (Type b) assortment record higher mean sales (~8,554) compared to "Basic" (~5,481) and "Extended" (~6,059).
+- **Customer Volume & Basket Size Correlation**: Customer count is the single strongest contemporaneous driver of sales (Pearson correlation ~0.89). Promotional periods increase customer footfall (+58.3%) and raise average spend per customer (+13.9% from 8.94 to 10.18).
+
+---
+
+## 2. Classical Time Series Forecasting Benchmarks
+
+- **Holdout Framework**: All forecasting models were evaluated on an identical 60-day chronological test horizon (2015-06-02 to 2015-07-31) on daily aggregate sales to prevent look-ahead bias and ensure leakage-free benchmarking.
+- **Naive & Baseline Models**:
+  - *Naive (Last Value)*: MAE = 2,746,029 | RMSE = 4,278,452. Failed to anticipate weekly cycle drops, generating extreme error swings.
+  - *Seasonal Naive (7-day lag)*: MAE = 2,084,718 | RMSE = 2,570,396. Captured the 7-day cyclical pattern, delivering a ~24.1% MAE improvement over standard Naive.
+- **ARIMA vs. SARIMA**:
+  - *ARIMA(7,0,0)*: MAE = 2,075,115 | RMSE = 2,727,432. Autoregressive lags slightly stabilized day-to-day variance but struggled on holiday boundary shifts.
+  - *SARIMA(1,0,0)x(1,0,1,7)*: MAE = 1,122,513 | RMSE = 1,540,606. Emerged as the best classical time series model, reducing MAE by 45.9% relative to ARIMA by explicitly incorporating weekly multiplicative seasonality.
+- **Classical Model Limitations**: Classical univariate ARIMA/SARIMA models rely exclusively on target history and cannot incorporate exogenous covariates (promotions, holidays, day-of-month indicators), leading to systematic under-prediction during promo weeks.
+
+---
+
+## 3. Machine Learning Forecasting (LightGBM)
+
+- **Predictive Superiority**: LightGBM outperformed all classical time series models by a substantial margin on the identical 60-day holdout:
+  - *LightGBM*: MAE = 323,834 | RMSE = 451,189.
+  - **71.15% MAE reduction** and **70.71% RMSE reduction** compared to the best classical model (SARIMA).
+- **Feature Engineering Value**: Machine learning models gain predictive power through temporal, lag, rolling window, and promotional features:
+  - *Lags & Windows*: Lagged sales (`lag_7`, `lag_14`, `lag_28`) and rolling window averages (`rolling_mean_7`, `rolling_mean_14`, `rolling_std_7`) capture both short-term momentum and baseline trends.
+  - *Calendar & Exogenous Signals*: Day of week, day of month, month, active promotions, and holiday indicators allow non-linear pattern capture during special events.
+- **Top Feature Importances**:
+  1. `lag_7` (same day last week sales)
+  2. `rolling_mean_7` (7-day rolling baseline)
+  3. `Promo` (active promotion status)
+  4. `DayOfWeek` (weekly seasonality encoding)
+  5. `lag_14` (two-week lagged benchmark)
+
+---
+
+## 4. Forecasting Model Performance Summary Table
+
+| Rank | Model | MAE | RMSE | MAE Rank | RMSE Rank | Improvement vs SARIMA (MAE) |
+|:---:|:---|---:|---:|:---:|:---:|:---:|
+| **1** | **LightGBM (ML Regressor)** | **323,834** | **451,189** | **1** | **1** | **+71.15%** |
+| 2 | SARIMA(1,0,0)x(1,0,1,7) | 1,122,513 | 1,540,606 | 2 | 2 | Benchmark (0.00%) |
+| 3 | ARIMA(7,0,0) | 2,075,114 | 2,727,432 | 3 | 4 | -84.86% |
+| 4 | Seasonal Naive (7-day lag) | 2,084,718 | 2,570,396 | 4 | 3 | -85.72% |
+| 5 | Naive (Last Day) | 2,746,029 | 4,278,452 | 5 | 5 | -144.63% |
+
+---
+
+## 5. Econometric & Statistical Promotion Analysis
+
+- **Open-Store Baseline Comparison**:
+  - Non-Promotion Average Sales: **5,929** (Median: 5,459)
+  - Promotion-Active Average Sales: **8,228** (Median: 7,649)
+  - Unadjusted Absolute Difference: **+2,299** sales/day
+  - Unadjusted Relative Difference: **+38.77%** higher mean sales during promotions.
+- **Within-Store Consistency**:
+  - Across all 1,115 stores with both promotional and non-promotional trading days, **1,114 stores (99.91%)** exhibited higher average sales during active promotions.
+  - This confirms that promotional lifts are ubiquitous across the entire store fleet rather than skewed by flagship or outlier locations.
+- **Controlled Calendar Cell Stratification**:
+  - When comparing sales within matched calendar strata (same day-of-week, school holiday status, and state holiday status), **96.00% of calendar groups (24 of 25)** showed higher mean sales on promo days.
+- **Multivariate OLS Fixed Effects Regression**:
+  - Specification: `Sales ~ Promo + C(Store) + C(DayOfWeek) + SchoolHoliday + C(StateHoliday)` on 844,392 open-store observations.
+  - Estimated Promo Coefficient ($\beta_{promo}$): **+2,293.66**
+  - Standard Error: **3.63** | t-statistic: **631.1** | p-value: **< 0.0001**
+  - 95% Confidence Interval: **[2,286.54, 2,300.79]**
+- **Robustness of the Association**:
+  - Controlling for store identity, weekly seasonality, and school/state holidays yielded an adjusted estimate (+2,293.66) almost identical to the unadjusted open-store differential (+2,298.87).
+- **Causal Inference Caveat**:
+  - The estimated coefficient represents a strong, statistically significant *observational association*. Because promotions in retail environments may coincide with vendor marketing budgets, product seasonality, or managerial scheduling, unobserved confounders prevent interpreting this strictly as an isolated causal treatment effect.
+
+---
+
+## 6. Strategic Business Recommendations
+
+1. **Adopt Gradient Boosted Trees for Operational Replenishment**: Machine learning forecasting (LightGBM) delivers superior accuracy over traditional statistical curves, reducing demand forecasting error by >70%. Deploying ML forecasts directly protects against stockouts and excess holding costs.
+2. **Synchronize Staffing with Promo Calendars**: Footfall expands by ~58% on promotion days alongside larger basket sizes (+13.9%). Operations must scale staffing and checkout lanes during active promo weeks to maintain service quality and conversion.
+3. **Store-Cluster Customized Inventory**: Store Type B and high-assortment branches experience significantly higher customer velocities; replenishment algorithms should dynamically adjust safety stock thresholds by store type and promo schedule.
