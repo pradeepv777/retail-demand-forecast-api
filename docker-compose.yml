@@ -1,0 +1,9 @@
+services:
+  retail-forecasting:
+    build: .
+    ports:
+      - "8888:8888"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
