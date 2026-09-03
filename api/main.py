@@ -37,6 +37,7 @@ SMOKE_TEST=true lets the app start without real model/data files.
 Used by CI to verify the container starts and routes respond correctly.
 """
 
+import contextlib
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -109,14 +110,6 @@ STORE_FEATURES = [
 # ---------------------------------------------------------------------------
 # App + shared state
 # ---------------------------------------------------------------------------
-app = FastAPI(
-    title="Retail Demand Forecasting API",
-    description=(
-        "Serves chain-wide and per-store daily sales forecasts from LightGBM models "
-        "trained on Rossmann Store Sales data."
-    ),
-    version="2.0.0",
-)
 
 _state: Dict = {
     # Chain-wide model
@@ -233,13 +226,15 @@ def _build_store_histories(
 
 
 # ---------------------------------------------------------------------------
-# Startup
+# Lifespan
 # ---------------------------------------------------------------------------
 
-@app.on_event("startup")
-def load_models_and_history():
+@contextlib.asynccontextmanager
+async def lifespan(app_: FastAPI):
+    """Load models and build history on startup. Nothing to clean up on shutdown."""
     if os.getenv("SMOKE_TEST", "").lower() == "true":
         # All state remains None — /health reports not loaded, forecasts return 503
+        yield
         return
 
     # --- Chain-wide model ---
@@ -258,6 +253,7 @@ def load_models_and_history():
             "Per-store model or store_features.pkl not found. "
             "/forecast/store endpoints will return 503."
         )
+        yield
         return
 
     _state["store_features"] = joblib.load(STORE_FEATURES_PATH)
@@ -265,6 +261,18 @@ def load_models_and_history():
     _state["store_history"] = _build_store_histories(
         TRAIN_CSV_PATH, _state["store_features"]
     )
+    yield
+
+
+app = FastAPI(
+    title="Retail Demand Forecasting API",
+    description=(
+        "Serves chain-wide and per-store daily sales forecasts from LightGBM models "
+        "trained on Rossmann Store Sales data."
+    ),
+    version="2.0.0",
+    lifespan=lifespan,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +301,7 @@ def _run_store_forecast(
     school_val: float,
 ) -> tuple:
     """
-    Returns (last_date, predictions_list, sales_series_after).
+    Returns (last_date, predictions_list).
 
     promo_val / school_val are the values to use for every forecast day.
     Caller is responsible for defaulting to trailing averages before calling.

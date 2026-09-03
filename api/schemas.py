@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -124,7 +124,7 @@ class WhatIfPromoResponse(BaseModel):
         description=(
             "Two forecasts are run for the same store: one with Promo=1 every day, "
             "one with Promo=0. The lift is the model's estimated marginal effect of "
-            "running a promotion. Historical A/B analysis (notebook 06) found an "
+            "running a promotion. Historical A/B analysis (notebook 07) found an "
             "average per-store promo lift of ~2,299/day across all store types."
         ),
     )

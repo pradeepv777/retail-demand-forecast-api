@@ -5,3 +5,6 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
+    # Model files and CSVs are loaded from the image (baked in via COPY . .)
+    # when running locally. On EC2 they are bind-mounted instead so they
+    # persist across deployments — see .github/workflows/cd.yml for details.
