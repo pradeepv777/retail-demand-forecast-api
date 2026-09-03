@@ -1,6 +1,6 @@
 # Retail Demand Forecasting and Promotion Analysis
 
-An end-to-end data science project using the Rossmann Store Sales dataset to analyze retail demand patterns, compare forecasting approaches, and examine the relationship between promotions and sales.
+An end-to-end data science project using the Rossmann Store Sales dataset to analyze retail demand patterns, compare forecasting approaches, examine promotion impact, and serve predictions via a production-ready API.
 
 ## Project Overview
 
@@ -9,13 +9,13 @@ Retail businesses need accurate demand forecasts to support inventory planning, 
 1. How accurately can future retail demand be forecasted using classical time series models and machine learning?
 2. How are promotions associated with sales after accounting for observable store and calendar differences?
 
-The project follows a complete workflow from exploratory analysis to model evaluation and statistical analysis.
+The project follows a complete workflow from exploratory analysis through model evaluation, statistical analysis, and deployment as a containerized REST API.
+
+---
 
 ## Key Results
 
-### Forecasting Performance
-
-All forecasting models were evaluated on the same chronological 60-day test period.
+### Forecasting Performance (chain-wide, 60-day holdout)
 
 | Rank | Model | MAE | RMSE |
 |---|---|---:|---:|
@@ -25,171 +25,187 @@ All forecasting models were evaluated on the same chronological 60-day test peri
 | 4 | Seasonal Naive | 2,084,718 | 2,570,396 |
 | 5 | Naive | 2,746,029 | 4,278,452 |
 
-LightGBM achieved the lowest error across both MAE and RMSE.
+LightGBM reduced MAE by **71.15%** and RMSE by **70.71%** over the best classical model (SARIMA).
 
-Compared with the best classical model, SARIMA, LightGBM reduced:
+### Per-Store Forecasting Performance (60-day holdout)
 
-- MAE by **71.15%**
-- RMSE by **70.71%**
+A separate store-level LightGBM model was trained on individual store-day rows with store metadata features:
+
+- Test MAE: **~659 per store per day**
+- Test RMSPE: **~14.4%**
 
 ### Promotion Analysis
 
-The promotion analysis was performed using only days when stores were open.
-
 - Average sales without promotion: **5,929**
 - Average sales with promotion: **8,228**
-- Unadjusted difference: **2,299**
-- Relative difference: **38.77%**
-- Stores with higher average sales during promotions: **1,114 out of 1,115**
-
-An OLS regression controlling for store, day of week, school holidays, and state holidays estimated a promotion association of approximately:
-
-**+2,293.66 in average sales**
-
-This result is interpreted as an association, not a causal effect, because the dataset is observational and unobserved confounding may remain.
+- Unadjusted lift: **+2,299 (+38.77%)**
+- OLS regression (controlling for store, day of week, holidays): **+2,293.66** (p < 0.0001, 95% CI [2,287, 2,301])
+- Stores with higher sales during promotions: **1,114 out of 1,115**
 
 ---
 
-# Project Workflow
+## API
 
-## 1. Exploratory Data Analysis
+The trained models are served as a REST API built with FastAPI and containerized with Docker.
 
+### Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/health` | Liveness check + model status |
+| POST | `/forecast` | Chain-wide daily sales forecast (all 1,115 stores) |
+| POST | `/forecast/store` | Per-store daily sales forecast |
+| POST | `/forecast/store/whatif` | Promo vs no-promo comparison for a single store |
+
+Full interactive documentation available at `http://localhost:8000/docs` (Swagger UI).
+
+### Running locally
+
+```bash
+docker-compose up --build
+```
+
+Then open `http://localhost:8000/docs`.
+
+### Example requests
+
+**Chain-wide forecast:**
+```bash
+curl -X POST http://localhost:8000/forecast \
+  -H "Content-Type: application/json" \
+  -d '{"days": 7}'
+```
+
+**Per-store forecast:**
+```bash
+curl -X POST http://localhost:8000/forecast/store \
+  -H "Content-Type: application/json" \
+  -d '{"store_id": 42, "days": 7}'
+```
+
+**What-if promo scenario:**
+```bash
+curl -X POST http://localhost:8000/forecast/store/whatif \
+  -H "Content-Type: application/json" \
+  -d '{"store_id": 42, "days": 7}'
+```
+
+> On Windows PowerShell use `Invoke-WebRequest` with `-Body` instead of curl single-quote syntax.
+
+---
+
+## Project Workflow
+
+### 1. Exploratory Data Analysis
 Notebook: [`01_eda.ipynb`](notebooks/01_eda.ipynb)
 
-The exploratory analysis investigates:
+Sales distributions, open/closed patterns, day-of-week seasonality, monthly and yearly trends, promotion behavior, holiday effects, and customer-sales relationships.
 
-- Sales distributions
-- Open and closed store patterns
-- Day-of-week seasonality
-- Monthly and yearly sales patterns
-- Promotion behavior
-- Holiday effects
-- Customer and sales relationships
-
-The analysis identified strong weekly patterns in retail demand, which motivated the use of seasonal forecasting models.
-
----
-
-## 2. Classical Time Series Forecasting
-
+### 2. Classical Time Series Forecasting
 Notebook: [`02_forecasting_classical.ipynb`](notebooks/02_forecasting_classical.ipynb)
 
-Classical forecasting models were developed using aggregated daily Rossmann sales.
+Naive, Seasonal Naive, ARIMA, and SARIMA models evaluated on a chronological 60-day holdout. SARIMA was the strongest classical model.
 
-Models evaluated:
-
-- Naive Forecast
-- Seasonal Naive Forecast
-- ARIMA
-- SARIMA
-
-A chronological train-test split was used to avoid data leakage.
-
-SARIMA was the strongest classical forecasting model and captured the weekly seasonal structure better than the non-seasonal models.
-
----
-
-## 3. Machine Learning Forecasting
-
+### 3. Machine Learning Forecasting
 Notebook: [`03_forecasting_modern.ipynb`](notebooks/03_forecasting_modern.ipynb)
 
-A LightGBM regression model was trained using time-based features.
+LightGBM trained on lag features, rolling averages, and calendar features on chain-wide aggregated daily data. Substantially outperformed all classical models.
 
-Features include:
-
-- Lagged sales
-- Rolling averages
-- Day of week
-- Day of month
-- Month
-- Promotion-related features
-- Other calendar information
-
-The model was evaluated on the same chronological test period used for the classical models.
-
-LightGBM substantially outperformed the classical forecasting approaches.
-
----
-
-## 4. Model Comparison
-
+### 4. Model Comparison
 Notebook: [`04_model_comparison.ipynb`](notebooks/04_model_comparison.ipynb)
 
-All forecasting models were compared using:
+Fair comparison across all models on the same target and test period. LightGBM selected as the best model.
 
-- Mean Absolute Error (MAE)
-- Root Mean Squared Error (RMSE)
-
-The comparison uses the same target and test period across models to ensure a fair evaluation.
-
-LightGBM was selected as the best-performing model based on both evaluation metrics.
-
----
-
-## 5. Promotion Analysis
-
+### 5. Promotion Analysis
 Notebook: [`05_promotion_analysis.ipynb`](notebooks/05_promotion_analysis.ipynb)
 
-The promotion analysis examines the relationship between promotional activity and sales.
+Promotion vs non-promotion sales comparison with within-store controls, OLS regression, confidence intervals, and discussion of observational limitations.
 
-The analysis includes:
+### 6. Per-Store Forecasting
+Notebook: [`06_store_level_forecasting.ipynb`](notebooks/06_store_level_forecasting.ipynb)
 
-- Promotion versus non-promotion sales comparison
-- Within-store comparison
-- Calendar-controlled comparisons
-- OLS regression
-- Confidence intervals
-- Discussion of confounding and observational limitations
+Store-level LightGBM trained on individual store-day rows with store metadata features (StoreType, Assortment, CompetitionDistance, Promo2). Enables per-store demand forecasting and powers the `/forecast/store` API endpoints.
 
-Only open-store observations are used in the analysis to avoid zero-sales values from closed stores distorting the comparison.
+### 7. A/B Test — Promotion Effect
+Notebook: [`07_ab_test_promo_effect.ipynb`](notebooks/07_ab_test_promo_effect.ipynb)
 
-The results consistently show higher sales during promotion-active periods. However, the analysis does not claim that promotions directly caused the observed sales increase.
+Welch's t-test on 844,392 open store-day observations. Promo lift of ~2,299/day is statistically significant (p < 0.0001) and consistent across all four store types. Power analysis, stability check, and causal inference caveats included.
 
 ---
 
-# Dataset
+## Dataset
 
-The project uses the Rossmann Store Sales dataset.
+The project uses the [Rossmann Store Sales](https://www.kaggle.com/c/rossmann-store-sales) dataset.
 
-Main files:
-
-- `train.csv` - Historical store-level daily sales data
-- `test.csv` - Test data without sales values
-- `store.csv` - Store-level information
-
-Important variables include:
-
-| Variable | Description |
+| File | Description |
 |---|---|
-| Store | Store identifier |
-| Date | Date of observation |
-| Sales | Daily store sales |
-| Customers | Number of customers |
-| Open | Whether the store was open |
-| Promo | Whether a promotion was active |
-| StateHoliday | State holiday indicator |
-| SchoolHoliday | School holiday indicator |
+| `train.csv` | Historical store-level daily sales (1,017,209 rows) |
+| `store.csv` | Store metadata — type, assortment, competition, promotions |
+| `test.csv` | Test data without sales values |
 
 ---
 
-# Repository Structure
+## Repository Structure
 
 ```text
-retail_demand_forecasting/
+rossmann_demand_forecasting/
+│
+├── api/
+│   ├── main.py          # FastAPI app — all endpoints
+│   └── schemas.py       # Pydantic request/response models
 │
 ├── Data/
 │   └── raw/
 │       ├── train.csv
-│       ├── test.csv
-│       └── store.csv
+│       ├── store.csv
+│       └── test.csv
+│
+├── figures/             # Saved plots from notebooks
+├── models/
+│   ├── lightgbm_model.pkl        # Chain-wide forecast model
+│   ├── lightgbm_store_model.pkl  # Per-store forecast model
+│   └── store_features.pkl        # Encoded store metadata lookup
 │
 ├── notebooks/
 │   ├── 01_eda.ipynb
 │   ├── 02_forecasting_classical.ipynb
 │   ├── 03_forecasting_modern.ipynb
 │   ├── 04_model_comparison.ipynb
-│   └── 05_promotion_analysis.ipynb
+│   ├── 05_promotion_analysis.ipynb
+│   ├── 06_store_level_forecasting.ipynb
+│   └── 07_ab_test_promo_effect.ipynb
 │
-├── .gitignore
+├── reports/
+│   └── insights.txt     # Full analytical findings
+│
+├── tests/
+│   └── test_smoke.py    # Smoke tests (run against live container)
+│
+├── .dockerignore
+├── .github/
+│   └── workflows/
+│       ├── ci.yml       # Build + smoke test on every push
+│       └── cd.yml       # Deploy to EC2 on push to main
+├── docker-compose.yml
+├── Dockerfile
 ├── requirements.txt
-└── README.md
+└── requirements-dev.txt
+```
+
+---
+
+## Deployment (EC2)
+
+The CD pipeline in `.github/workflows/cd.yml` builds the Docker image and deploys it to an EC2 instance on every push to `main`.
+
+Before the first deployment, upload the model files and data to EC2 once:
+
+```bash
+scp -i your-key.pem models/lightgbm_model.pkl       ec2-user@<host>:~/rossmann/models/
+scp -i your-key.pem models/lightgbm_store_model.pkl ec2-user@<host>:~/rossmann/models/
+scp -i your-key.pem models/store_features.pkl       ec2-user@<host>:~/rossmann/models/
+scp -i your-key.pem Data/raw/train.csv              ec2-user@<host>:~/rossmann/Data/raw/
+scp -i your-key.pem Data/raw/store.csv              ec2-user@<host>:~/rossmann/Data/raw/
+```
+
+Required GitHub Secrets: `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`.
