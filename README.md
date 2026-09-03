@@ -25,7 +25,7 @@ The project follows a complete workflow from exploratory analysis through model 
 | 4 | Seasonal Naive | 2,084,718 | 2,570,396 |
 | 5 | Naive | 2,746,029 | 4,278,452 |
 
-LightGBM reduced MAE by **71.15%** and RMSE by **70.71%** over the best classical model (SARIMA).
+LightGBM reduced MAE by **71.15%** and RMSE by **70.71%** over the best classical model was(SARIMA).
 
 ### Per-Store Forecasting Performance (60-day holdout)
 
