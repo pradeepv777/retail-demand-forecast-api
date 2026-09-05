@@ -15,7 +15,6 @@ model file or training CSV is needed. The goal is to confirm:
 import os
 
 import requests
-import pytest
 
 BASE = os.getenv("API_BASE_URL", "http://localhost:8000")
 

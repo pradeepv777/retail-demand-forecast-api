@@ -205,7 +205,6 @@ async def lifespan(app_: FastAPI):
     yield
 
 
-
 app = FastAPI(
     title="Retail Demand Forecasting API",
     description=(
