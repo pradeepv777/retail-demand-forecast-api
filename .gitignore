@@ -60,3 +60,7 @@ Notes/
 
 # Testing artifacts
 .pytest_cache/
+
+# MLflow tracking data (local runs, can be large)
+mlruns/
+mlflow.db

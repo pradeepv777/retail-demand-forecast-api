@@ -20,6 +20,8 @@ Notes/
 figures/
 reports/
 scripts/
+mlruns/
+mlflow.db
 
 # IDE
 .vscode

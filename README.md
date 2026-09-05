@@ -187,7 +187,7 @@ rossmann_demand_forecasting/
 │       ├── ci.yml       # Build + smoke test on every push
 │       └── cd.yml       # Deploy to EC2 on push to main
 ├── docker-compose.yml
-├── Dockerfile
+├── mlflow.db            # MLflow experiment tracking (SQLite, local only)
 ├── requirements.txt
 └── requirements-dev.txt
 ```
@@ -209,3 +209,52 @@ scp -i your-key.pem Data/raw/store.csv              ec2-user@<host>:~/rossmann/D
 ```
 
 Required GitHub Secrets: `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`.
+
+---
+
+## Experiment Tracking
+
+Model experiments are tracked with [MLflow](https://mlflow.org/) using a local SQLite backend (`mlflow.db`). No tracking server required — all data is written to a single file in the project root.
+
+### Viewing the UI
+
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+Then open `http://localhost:5000`. All 9 runs appear in one experiment table, sortable by MAE or RMSPE.
+
+### What's tracked
+
+**Experiment:** `rossmann-demand-forecasting`
+
+All runs share the same experiment so chain-wide and per-store models can be compared side by side.
+
+**Chain-wide models** (notebook 04) — one run per model, each logging:
+- Params: model order/hyperparameters, feature list, train/test split dates
+- Metrics: `mae`, `rmse`
+- Artifacts: MAE and RMSE comparison bar charts (attached to the LightGBM run)
+- Tags: `model_type`, `scope=chain_wide`, `deployed=true` (LightGBM), `endpoint=/forecast`
+
+| Run | MAE | RMSE | Run ID |
+|---|---:|---:|---|
+| Naive | 2,746,029 | 4,278,452 | `5c220ddc` |
+| Seasonal Naive | 2,084,718 | 2,570,396 | `44520ed4` |
+| ARIMA | 2,075,115 | 2,727,432 | `66142cea` |
+| SARIMA | 1,122,513 | 1,540,606 | `ca803732` |
+| **LightGBM** ✓ deployed | **323,834** | **451,189** | `820f65d8` |
+
+**Per-store LightGBM variants** (notebook 06) — four runs exploring hyperparameter space:
+- Params: `n_estimators`, `learning_rate`, `num_leaves`, `max_depth`, feature list
+- Metrics: `mae`, `rmspe` (Kaggle competition metric)
+- Artifacts: feature importance plot (baseline run only)
+- Tags: `scope=per_store`, `deployed=true` (baseline), `endpoint=/forecast/store`
+
+| Run | num_leaves | lr | MAE | RMSPE | Run ID |
+|---|---:|---:|---:|---:|---|
+| **baseline** ✓ deployed | 31 | 0.05 | 659 | 14.38% | `ae4495dd` |
+| more_leaves | 63 | 0.05 | **638** | **13.34%** | `085f8e17` |
+| lower_lr | 31 | 0.02 | 673 | 14.99% | `6f90262d` |
+| deeper (max_depth=8) | 31 | 0.05 | 665 | 14.72% | `66b50999` |
+
+> The `more_leaves` variant (num_leaves=63) outperformed the deployed baseline on both metrics. The baseline was retained as the deployed model for reproducibility. Promoting `more_leaves` to production is a straightforward next step.
