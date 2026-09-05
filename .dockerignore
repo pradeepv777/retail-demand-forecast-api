@@ -31,3 +31,8 @@ tests/
 
 # Dev-only dependencies file
 requirements-dev.txt
+
+# Archive files
+*.tar
+*.tar.gz
+*.zip

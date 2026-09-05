@@ -46,6 +46,7 @@ from typing import Dict
 import joblib
 import pandas as pd
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from .schemas import (
     DailyForecast,
@@ -126,15 +127,11 @@ _state: Dict = {
 # History builders
 # ---------------------------------------------------------------------------
 
-def _build_daily_history(train_csv_path: Path) -> pd.DataFrame:
+def _build_daily_history(train_df: pd.DataFrame) -> pd.DataFrame:
     """Reproduces the aggregation + feature engineering from
     notebooks/03_forecasting_modern.ipynb (chain-wide)."""
-    train = pd.read_csv(train_csv_path, low_memory=False)
-    train["Date"] = pd.to_datetime(train["Date"])
-    train = train.sort_values("Date").reset_index(drop=True)
-
     df = (
-        train.groupby("Date")
+        train_df.groupby("Date")
         .agg(
             Sales=("Sales", "sum"),
             Promo=("Promo", "sum"),
@@ -165,22 +162,19 @@ def _build_daily_history(train_csv_path: Path) -> pd.DataFrame:
 
 
 def _build_store_histories(
-    train_csv_path: Path,
+    train_df: pd.DataFrame,
     store_features: Dict,
 ) -> Dict[int, pd.DataFrame]:
     """Build a per-store history dict keyed by store_id.
 
     Each value is a DataFrame sorted by Date with all STORE_FEATURES
     pre-computed, matching the feature engineering in
-    notebooks/07_store_level_forecasting.ipynb.
+    notebooks/06_store_level_forecasting.ipynb.
     Only Open==1 days are kept — closed days have Sales=0 which would
     corrupt the lag features used for recursive inference.
     """
-    train = pd.read_csv(train_csv_path, low_memory=False)
-    train["Date"] = pd.to_datetime(train["Date"])
-
     # Keep only open store-days
-    train = train[train["Open"] == 1].copy()
+    train = train_df[train_df["Open"] == 1].copy()
 
     # Encode StateHoliday as binary
     train["StateHoliday"] = train["StateHoliday"].apply(
@@ -243,8 +237,13 @@ async def lifespan(app_: FastAPI):
     if not TRAIN_CSV_PATH.exists():
         raise RuntimeError(f"Training data not found at {TRAIN_CSV_PATH}")
 
+    # Load raw training data once from disk and parse dates
+    train_df = pd.read_csv(TRAIN_CSV_PATH, low_memory=False)
+    train_df["Date"] = pd.to_datetime(train_df["Date"])
+    train_df = train_df.sort_values("Date").reset_index(drop=True)
+
     _state["model"] = joblib.load(MODEL_PATH)
-    _state["history"] = _build_daily_history(TRAIN_CSV_PATH)
+    _state["history"] = _build_daily_history(train_df)
 
     # --- Per-store model (optional — warn but don't crash if missing) ---
     if not STORE_MODEL_PATH.exists() or not STORE_FEATURES_PATH.exists():
@@ -259,9 +258,10 @@ async def lifespan(app_: FastAPI):
     _state["store_features"] = joblib.load(STORE_FEATURES_PATH)
     _state["store_model"] = joblib.load(STORE_MODEL_PATH)
     _state["store_history"] = _build_store_histories(
-        TRAIN_CSV_PATH, _state["store_features"]
+        train_df, _state["store_features"]
     )
     yield
+
 
 
 app = FastAPI(
@@ -272,6 +272,14 @@ app = FastAPI(
     ),
     version="2.0.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -291,8 +299,20 @@ def health():
 
 
 # ---------------------------------------------------------------------------
-# Helper: run a recursive per-store forecast for N days
+# Helpers: store lookup and recursive forecasting
 # ---------------------------------------------------------------------------
+
+def _get_store_history(store_id: int) -> pd.DataFrame:
+    """Validate store model status and return store history, or raise HTTP error."""
+    if _state["store_model"] is None or _state["store_history"] is None:
+        raise HTTPException(status_code=503, detail="Store model not loaded yet")
+    if store_id not in _state["store_history"]:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Store {store_id} not found in training data.",
+        )
+    return _state["store_history"][store_id]
+
 
 def _run_store_forecast(
     store_id: int,
@@ -403,6 +423,7 @@ def forecast(request: ForecastRequest):
 
         X = pd.DataFrame([row])[CHAIN_FEATURES]
         pred = float(model.predict(X)[0])
+        pred = max(pred, 0.0)  # sales can't be negative
         predictions.append(DailyForecast(date=next_date.date(), predicted_sales=round(pred, 2)))
         sales_series.append(pred)
 
@@ -426,16 +447,7 @@ def forecast(request: ForecastRequest):
 @app.post("/forecast/store", response_model=StoreForecastResponse)
 def forecast_store(request: StoreForecastRequest):
     """Forecast daily sales for a specific Rossmann store."""
-    if _state["store_model"] is None or _state["store_history"] is None:
-        raise HTTPException(status_code=503, detail="Store model not loaded yet")
-
-    if request.store_id not in _state["store_history"]:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Store {request.store_id} not found in training data.",
-        )
-
-    store_hist = _state["store_history"][request.store_id]
+    store_hist = _get_store_history(request.store_id)
     recent = store_hist.tail(7)
 
     promo_val = (
@@ -487,17 +499,9 @@ def forecast_store_whatif(request: WhatIfPromoRequest):
     promo lift of ~2,299/store/day (p < 0.0001, 95% CI [2,286, 2,312]).
     This endpoint lets you see what the model predicts for your specific store.
     """
-    if _state["store_model"] is None or _state["store_history"] is None:
-        raise HTTPException(status_code=503, detail="Store model not loaded yet")
-
-    if request.store_id not in _state["store_history"]:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Store {request.store_id} not found in training data.",
-        )
-
-    store_hist = _state["store_history"][request.store_id]
+    store_hist = _get_store_history(request.store_id)
     school_val = float(store_hist.tail(7)["SchoolHoliday"].mean())
+
 
     # Run both scenarios
     _, preds_with_promo = _run_store_forecast(

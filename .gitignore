@@ -58,6 +58,5 @@ Thumbs.db
 Notes/
 *.log
 
-# MLflow tracking (local file-based runs — not committed)
-mlruns/
-mlflow.db
+# Testing artifacts
+.pytest_cache/
