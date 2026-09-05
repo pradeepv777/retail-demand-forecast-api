@@ -2,6 +2,8 @@
 
 An end-to-end data science project using the Rossmann Store Sales dataset to analyze retail demand patterns, compare forecasting approaches, examine promotion impact, and serve predictions via a production-ready API.
 
+🚀 **Live API Docs (AWS EC2):** [http://98.130.120.213:8000/docs](http://98.130.120.213:8000/docs)
+
 ## Project Overview
 
 Retail businesses need accurate demand forecasts to support inventory planning, staffing, and operational decisions. This project analyzes historical sales data from Rossmann stores and answers two main questions:
@@ -48,6 +50,9 @@ A separate store-level LightGBM model was trained on individual store-day rows w
 
 The trained models are served as a REST API built with FastAPI and containerized with Docker.
 
+🚀 **Live API Documentation (AWS EC2):** [http://98.130.120.213:8000/docs](http://98.130.120.213:8000/docs)  
+🔗 **Live Health Check:** [http://98.130.120.213:8000/health](http://98.130.120.213:8000/health)
+
 ### Endpoints
 
 | Method | Endpoint | Description |
@@ -57,7 +62,7 @@ The trained models are served as a REST API built with FastAPI and containerized
 | POST | `/forecast/store` | Per-store daily sales forecast |
 | POST | `/forecast/store/whatif` | Promo vs no-promo comparison for a single store |
 
-Full interactive documentation available at `http://localhost:8000/docs` (Swagger UI).
+Full interactive documentation is available live at [http://98.130.120.213:8000/docs](http://98.130.120.213:8000/docs) (or locally at `http://localhost:8000/docs`).
 
 ### Running locally
 
@@ -198,6 +203,10 @@ rossmann_demand_forecasting/
 
 The CD pipeline in `.github/workflows/cd.yml` builds the Docker image and deploys it to an EC2 instance on every push to `main`.
 
+- **Live Service URL**: [http://98.130.120.213:8000](http://98.130.120.213:8000)
+- **Interactive Swagger Docs**: [http://98.130.120.213:8000/docs](http://98.130.120.213:8000/docs)
+- **Health Check**: [http://98.130.120.213:8000/health](http://98.130.120.213:8000/health)
+
 Before the first deployment, upload the model files and data to EC2 once:
 
 ```bash
@@ -258,5 +267,3 @@ All runs share the same experiment so chain-wide and per-store models can be com
 | deeper (max_depth=8) | 31 | 0.05 | 665 | 14.72% | `66b50999` |
 
 > The `more_leaves` variant (num_leaves=63) outperformed the deployed baseline on both metrics. The baseline was retained as the deployed model for reproducibility. Promoting `more_leaves` to production is a straightforward next step.
-
-<!-- AWS CD deployment test -->
