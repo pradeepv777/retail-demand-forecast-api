@@ -258,3 +258,5 @@ All runs share the same experiment so chain-wide and per-store models can be com
 | deeper (max_depth=8) | 31 | 0.05 | 665 | 14.72% | `66b50999` |
 
 > The `more_leaves` variant (num_leaves=63) outperformed the deployed baseline on both metrics. The baseline was retained as the deployed model for reproducibility. Promoting `more_leaves` to production is a straightforward next step.
+
+<!-- AWS CD deployment test -->
