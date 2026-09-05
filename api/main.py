@@ -124,99 +124,43 @@ _state: Dict = {
 
 
 # ---------------------------------------------------------------------------
-# History builders
+# History builders (optimized for fast cold-start and low memory footprint)
 # ---------------------------------------------------------------------------
 
 def _build_daily_history(train_df: pd.DataFrame) -> pd.DataFrame:
-    """Reproduces the aggregation + feature engineering from
-    notebooks/03_forecasting_modern.ipynb (chain-wide)."""
-    df = (
-        train_df.groupby("Date")
+    """Vectorized aggregation of chain-wide sales and holiday signals."""
+    temp_df = train_df[["Date", "Sales", "Promo", "SchoolHoliday"]].copy()
+    temp_df["StateHoliday_Count"] = (~train_df["StateHoliday"].isin([0, "0"])).astype(int)
+
+    return (
+        temp_df.groupby("Date")
         .agg(
             Sales=("Sales", "sum"),
             Promo=("Promo", "sum"),
             SchoolHoliday=("SchoolHoliday", "sum"),
-            StateHoliday_Count=(
-                "StateHoliday",
-                lambda x: ((x != "0") & (x != 0)).sum(),
-            ),
+            StateHoliday_Count=("StateHoliday_Count", "sum"),
         )
         .reset_index()
         .sort_values("Date")
         .reset_index(drop=True)
     )
 
-    df["DayOfWeek_Num"] = df["Date"].dt.dayofweek
-    df["DayOfWeek"] = df["Date"].dt.dayofweek + 1
-    df["Month"] = df["Date"].dt.month
-    df["Year"] = df["Date"].dt.year
-    df["DayOfMonth"] = df["Date"].dt.day
 
-    df["Sales_Lag_1"] = df["Sales"].shift(1)
-    df["Sales_Lag_7"] = df["Sales"].shift(7)
-    df["Sales_Lag_14"] = df["Sales"].shift(14)
-    df["Sales_Rolling_Mean_7"] = df["Sales"].shift(1).rolling(window=7).mean()
-    df["Sales_Rolling_Mean_14"] = df["Sales"].shift(1).rolling(window=14).mean()
+def _build_store_histories(train_df: pd.DataFrame) -> Dict[int, pd.DataFrame]:
+    """Build a lightweight per-store history dict keyed by store_id.
 
-    return df
-
-
-def _build_store_histories(
-    train_df: pd.DataFrame,
-    store_features: Dict,
-) -> Dict[int, pd.DataFrame]:
-    """Build a per-store history dict keyed by store_id.
-
-    Each value is a DataFrame sorted by Date with all STORE_FEATURES
-    pre-computed, matching the feature engineering in
-    notebooks/06_store_level_forecasting.ipynb.
-    Only Open==1 days are kept — closed days have Sales=0 which would
-    corrupt the lag features used for recursive inference.
+    Only Open==1 days and the essential inference columns (Date, Sales, Promo,
+    SchoolHoliday) are retained. All lag and rolling calculations for future
+    horizons are computed dynamically during recursive inference.
     """
-    # Keep only open store-days
-    train = train_df[train_df["Open"] == 1].copy()
-
-    # Encode StateHoliday as binary
-    train["StateHoliday"] = train["StateHoliday"].apply(
-        lambda x: 0 if (x == "0" or x == 0) else 1
-    ).astype(int)
-
-    # Calendar features
-    train["DayOfWeek"] = train["Date"].dt.dayofweek + 1
-    train["Month"] = train["Date"].dt.month
-    train["Year"] = train["Date"].dt.year
-    train["DayOfMonth"] = train["Date"].dt.day
-
-    # Attach static store metadata
-    meta_df = pd.DataFrame.from_dict(store_features, orient="index")
-    meta_df.index.name = "Store"
-    train = train.join(meta_df, on="Store")
-
-    # Sort for grouped shift
-    train = train.sort_values(["Store", "Date"]).reset_index(drop=True)
-
-    # Per-store lag / rolling features
-    grp = train.groupby("Store")["Sales"]
-    train["Sales_Lag_1"] = grp.shift(1)
-    train["Sales_Lag_7"] = grp.shift(7)
-    train["Sales_Lag_14"] = grp.shift(14)
-    train["Sales_Rolling_Mean_7"] = grp.shift(1).groupby(train["Store"]).transform(
-        lambda x: x.rolling(7, min_periods=1).mean()
-    )
-    train["Sales_Rolling_Mean_14"] = grp.shift(1).groupby(train["Store"]).transform(
-        lambda x: x.rolling(14, min_periods=1).mean()
-    )
-
-    # Build per-store dict
-    histories: Dict[int, pd.DataFrame] = {}
-    for store_id, group in train.groupby("Store"):
-        histories[int(store_id)] = (
-            group.sort_values("Date")
-            .dropna(subset=["Sales_Lag_14"])
-            .reset_index(drop=True)
-        )
-
-    return histories
+    open_df = train_df.loc[
+        train_df["Open"] == 1,
+        ["Store", "Date", "Sales", "Promo", "SchoolHoliday"],
+    ]
+    return {
+        int(store_id): group.reset_index(drop=True)
+        for store_id, group in open_df.groupby("Store")
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -257,9 +201,7 @@ async def lifespan(app_: FastAPI):
 
     _state["store_features"] = joblib.load(STORE_FEATURES_PATH)
     _state["store_model"] = joblib.load(STORE_MODEL_PATH)
-    _state["store_history"] = _build_store_histories(
-        train_df, _state["store_features"]
-    )
+    _state["store_history"] = _build_store_histories(train_df)
     yield
 
 
