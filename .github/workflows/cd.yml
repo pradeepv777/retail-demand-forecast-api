@@ -1,6 +1,6 @@
 name: CD
 
-# Runs only on pushes to main — after CI has already passed.
+# Runs only on pushes to main, after CI has already passed.
 on:
   push:
     branches: ["main"]
@@ -22,13 +22,10 @@ jobs:
       # The image is built here, saved to a .tar, SCP'd to the EC2 instance,
       # loaded there, and the container is restarted.
       #
-      # Required GitHub Secrets (set in repo Settings → Secrets → Actions):
+      # Required GitHub Secrets:
       #   EC2_HOST       — public IP or DNS of your EC2 instance
-      #                    e.g. ec2-12-34-56-78.compute-1.amazonaws.com
-      #   EC2_USER       — SSH username (usually "ubuntu" for Ubuntu AMIs,
-      #                    "ec2-user" for Amazon Linux)
+      #   EC2_USER       — SSH username
       #   EC2_SSH_KEY    — contents of your .pem private key file
-      #                    (paste the full key including -----BEGIN/END-----)
 
       - name: Save Docker image to tarball
         run: docker save rossmann-api:latest | gzip > rossmann-api.tar.gz
@@ -46,22 +43,8 @@ jobs:
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/rossmann-api.tar.gz
 
       # ── Deploy on EC2 ────────────────────────────────────────────────────
-      # Loads the new image, stops the old container (if any), starts fresh.
-      # The model files and training CSV must already be present on the EC2
-      # instance at ~/rossmann/. Upload them once manually:
-      #
-      #   scp -i your-key.pem models/lightgbm_model.pkl       ec2-user@<host>:~/rossmann/models/
-      #   scp -i your-key.pem models/lightgbm_store_model.pkl ec2-user@<host>:~/rossmann/models/
-      #   scp -i your-key.pem models/store_features.pkl       ec2-user@<host>:~/rossmann/models/
-      #   scp -i your-key.pem Data/raw/train.csv              ec2-user@<host>:~/rossmann/Data/raw/
-      #   scp -i your-key.pem Data/raw/store.csv              ec2-user@<host>:~/rossmann/Data/raw/
-      #
-      # Required files:
-      #   ~/rossmann/models/lightgbm_model.pkl        — chain-wide forecast model
-      #   ~/rossmann/models/lightgbm_store_model.pkl  — per-store forecast model
-      #   ~/rossmann/models/store_features.pkl        — encoded store metadata lookup
-      #   ~/rossmann/Data/raw/train.csv               — used to build sales history on startup
-      #   ~/rossmann/Data/raw/store.csv               — used to build per-store history on startup
+      # The model files and training CSV remain on EC2 and are bind-mounted
+      # into the container so they persist across deployments.
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -74,11 +57,10 @@ jobs:
 
             # Stop and remove the old container if running
             docker stop rossmann-api 2>/dev/null || true
-            docker rm   rossmann-api 2>/dev/null || true
+            docker rm rossmann-api 2>/dev/null || true
 
             # Start the new container
-            # Model files and CSVs are bind-mounted from the host so they
-            # persist across deployments without being baked into the image.
+            # Model files and CSVs are bind-mounted from the host.
             docker run -d \
               --name rossmann-api \
               --restart unless-stopped \
@@ -87,11 +69,23 @@ jobs:
               -v ~/rossmann/Data:/app/Data:ro \
               rossmann-api:latest
 
-            # Quick health check to confirm it started
-            sleep 5
-            curl -sf http://localhost:8000/health || \
-              (echo "Health check failed after deploy" && docker logs rossmann-api && exit 1)
+            # Wait for the API to become ready.
+            # The application loads the training data and models during startup,
+            # so allow up to 60 seconds instead of checking only once after 5 seconds.
+            for i in {1..12}; do
+              if curl -sf http://localhost:8000/health; then
+                echo "Health check passed"
+                exit 0
+              fi
+              echo "Waiting for API startup... ($i/12)"
+              sleep 5
+            done
 
+            echo "Health check failed after 60 seconds"
+            docker logs rossmann-api
+            exit 1
+
+      # ── Clean up ─────────────────────────────────────────────────────────
       - name: Clean up SSH key
         if: always()
         run: rm -f ec2_key.pem
